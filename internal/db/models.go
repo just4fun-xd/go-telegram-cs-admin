@@ -12,9 +12,11 @@ type Poll struct {
 	ChatID       int64
 	MessageID    int
 	IsClosed     bool
-	EventDate    time.Time  // Дата (и время) встречи
-	ReminderDate *time.Time // Время, когда нужно отправить напоминание
-	Reminded     bool       // Отправлено ли напоминание
+	OptionsCount int
+	EventDate    time.Time
+	ReminderDate *time.Time
+	Reminded     bool
+	PollDay      string
 }
 
 type Vote struct {
