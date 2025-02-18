@@ -5,15 +5,15 @@ import (
 	"regexp"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-
 	"go-telegram-cs-admin/internal/constants"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 var lastQuietMessage = make(map[int64]int)
 
+// sanitizeText удаляет знаки препинания и лишние символы
 func sanitizeText(text string) string {
-	// Убираем знаки препинания и символы (оставляем буквы и цифры)
 	re := regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 	return re.ReplaceAllString(text, "")
 }
@@ -23,12 +23,11 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	defer deleteUserCommand(bot, msg)
 
 	if msg.IsCommand() {
-		// Если команда, удаляем предыдущее "тихое" сообщение и обрабатываем команду.
+		// Удаляем предыдущее "тихое" сообщение (help/unknown)
 		if oldMsgID, ok := lastQuietMessage[chatID]; ok {
 			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			delete(lastQuietMessage, chatID)
 		}
-
 		switch msg.Command() {
 		case "start":
 			sendNormalMessage(bot, chatID, constants.MsgStart)
@@ -53,24 +52,16 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			sendQuietMessage(bot, chatID, constants.MsgUnknownCommand)
 		}
 	} else {
-		// Если это не команда, проверяем, содержит ли сообщение упоминание бота.
-		text := strings.ToLower(strings.TrimSpace(msg.Text))
-		if msg.Entities != nil {
-			for _, entity := range msg.Entities {
-				if entity.Type == "mention" {
-					// Извлекаем упоминание
-					mention := text[entity.Offset : entity.Offset+entity.Length]
-					// Если упоминание соответствует нашему боту, удаляем его из текста
-					if mention == "@"+strings.ToLower(bot.Self.UserName) {
-						text = strings.ReplaceAll(text, mention, "")
-					}
-				}
-			}
+		// Обработка текстовых сообщений (не команд)
+		if oldMsgID, ok := lastQuietMessage[chatID]; ok {
+			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
+			delete(lastQuietMessage, chatID)
 		}
-		// Обрезаем лишние пробелы после удаления упоминания.
-		text = strings.TrimSpace(text)
+		// Приводим текст к нижнему регистру и убираем пробелы
+		text := strings.ToLower(strings.TrimSpace(msg.Text))
+		// Также очищаем от лишней пунктуации
+		text = sanitizeText(text)
 
-		// Обрабатываем очищенный текст
 		switch text {
 		case "хуй":
 			reply := "Сам ты хуй, а если нужна помощь, то:\n" + constants.MsgHelp
@@ -79,7 +70,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			reply := "Сам ты пидор, а если нужна помощь, то:\n" + constants.MsgHelp
 			sendQuietMessage(bot, chatID, reply)
 		default:
-			sendQuietMessage(bot, chatID, constants.MsgUnknownCommand)
+			// Если текст не соответствует ни одному из заданных вариантов, не отвечаем.
 		}
 	}
 }
