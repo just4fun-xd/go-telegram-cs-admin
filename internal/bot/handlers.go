@@ -28,13 +28,17 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			delete(lastQuietMessage, chatID)
 		}
+
 		switch msg.Command() {
 		case "start":
 			sendNormalMessage(bot, chatID, constants.MsgStart)
+
 		case "help":
 			sendQuietMessage(bot, chatID, constants.MsgHelp)
+
 		case "poll":
 			SendPoll(bot, chatID)
+
 		case "poll_day":
 			args := strings.Split(msg.Text, " ")
 			if len(args) < 2 {
@@ -48,18 +52,18 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 				return
 			}
 			SendDayPoll(bot, chatID, dayStr)
+
 		default:
 			sendQuietMessage(bot, chatID, constants.MsgUnknownCommand)
 		}
 	} else {
-		// Обработка текстовых сообщений (не команд)
+		// Обычные текстовые сообщения
 		if oldMsgID, ok := lastQuietMessage[chatID]; ok {
 			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			delete(lastQuietMessage, chatID)
 		}
 		// Приводим текст к нижнему регистру и убираем пробелы
 		text := strings.ToLower(strings.TrimSpace(msg.Text))
-		// Также очищаем от лишней пунктуации
 		text = sanitizeText(text)
 
 		switch text {
@@ -70,7 +74,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			reply := "Сам ты пидор, а если нужна помощь, то:\n" + constants.MsgHelp
 			sendQuietMessage(bot, chatID, reply)
 		default:
-			// Если текст не соответствует ни одному из заданных вариантов, не отвечаем.
+			// Не отвечаем
 		}
 	}
 }

@@ -18,8 +18,6 @@ import (
 
 var dayRegex = regexp.MustCompile(`\((\d{2})\.(\d{2})\)`)
 
-const thresholdVotes = 10
-
 func HandlePollAnswer(bot *tgbotapi.BotAPI, pollAnswer *tgbotapi.PollAnswer) {
 	pollID := pollAnswer.PollID
 	userID := pollAnswer.User.ID
@@ -52,13 +50,12 @@ func HandlePollAnswer(bot *tgbotapi.BotAPI, pollAnswer *tgbotapi.PollAnswer) {
 	}
 }
 
-// handleWeeklyPoll — если user выбрал "Понедельник (17.02)" etc.
 func handleWeeklyPoll(bot *tgbotapi.BotAPI, pollAnswer *tgbotapi.PollAnswer, p *db.Poll, userID int64, userName string, options []string) {
 	for _, optID := range pollAnswer.OptionIDs {
 		if optID < 0 || optID >= len(options) {
 			continue
 		}
-		choice := options[optID] // "Понедельник (17.02)"
+		choice := options[optID]
 		v := db.Vote{
 			PollID:   p.PollID,
 			UserID:   userID,
@@ -69,14 +66,58 @@ func handleWeeklyPoll(bot *tgbotapi.BotAPI, pollAnswer *tgbotapi.PollAnswer, p *
 		db.DB.Create(&v)
 		log.Printf("✅ %s => weekly: %s", userName, choice)
 
-		c := db.CountVotesForDate(p.PollID, choice)
-		if c == constants.NumbersOfPlayers {
-			// Уведомление
-			voters := db.GetVotersForDate(p.PollID, choice)
-			alert := fmt.Sprintf("🔔 За день '%s' набралось 10 голосов!\nУчастники:\n%s", choice, voters)
-			sendNormalMessage(bot, p.ChatID, alert)
+		// Считаем голоса за конкретный вариант
+		var c int64
+		db.DB.Model(&db.Vote{}).
+			Where("poll_id = ? AND vote_date = ?", p.PollID, choice).
+			Count(&c)
 
-			finalizeWeeklyPoll(bot, p, choice)
+		// Если достигли порога (например, 10)
+		if c == int64(constants.NumbersOfPlayers) {
+			// Выбираем первые N голосов по времени (created_at)
+			var earliestVotes []db.Vote
+			db.DB.Where("poll_id = ? AND vote_date = ?", p.PollID, choice).
+				Order("created_at ASC").
+				Limit(constants.NumbersOfPlayers).
+				Find(&earliestVotes)
+
+			log.Printf("DEBUG: earliestVotes size=%d", len(earliestVotes))
+
+			// Собираем имена именно этих пользователей
+			usersSet := make(map[string]bool)
+			var usersList string
+			for _, v := range earliestVotes {
+				if !usersSet[v.UserName] {
+					usersSet[v.UserName] = true
+					usersList += "@" + v.UserName + "\n"
+				}
+			}
+
+			t, err := parseWeeklyDate(choice)
+			if err != nil {
+				log.Printf("Ошибка parseWeeklyDate: %v", err)
+				return
+			}
+
+			reminderTime := calcReminderTime(t)
+
+			alertMsg := fmt.Sprintf("🔔 За день '%s' набралось %d голосов!\nУчастники:\n%s",
+				choice, c, usersList)
+			finalMsg := fmt.Sprintf("Напоминание придёт %s.",
+				reminderTime.Format("02.01.2006 15:04:05"))
+			fullMsg := alertMsg + "\n\n" + finalMsg
+
+			sendNormalMessage(bot, p.ChatID, fullMsg)
+
+			// Если у вас используется модель Reminder, то можно создать запись тут
+			reminder := db.Reminder{
+				PollID:       p.PollID,
+				OptionDate:   choice,
+				ReminderTime: reminderTime,
+				Reminded:     false,
+			}
+			db.DB.Create(&reminder)
+			log.Printf("🕒 Создан Reminder для %s (PollID=%s) на %v", choice, p.PollID, reminderTime)
 		}
 	}
 }

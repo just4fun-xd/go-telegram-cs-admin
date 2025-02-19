@@ -27,3 +27,11 @@ type Vote struct {
 	ChatID   int64
 	VoteDate string
 }
+
+type Reminder struct {
+	gorm.Model
+	PollID       string    // связывает с Poll
+	OptionDate   string    // "Понедельник (17.02)" или "Вторник (18.02)" и т.д.
+	ReminderTime time.Time // когда нужно отправить напоминание
+	Reminded     bool      // было ли уже отправлено напоминание
+}

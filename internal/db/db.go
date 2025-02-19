@@ -13,13 +13,12 @@ func InitDB() {
 	var err error
 	DB, err = gorm.Open(sqlite.Open("bot.db"), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Ошибка подключения к базе данных:", err)
+		log.Fatalf("Ошибка подключения к базе данных: %v", err)
 	}
 
-	// Создаём/обновляем схемы
-	err = DB.AutoMigrate(&Poll{}, &Vote{})
+	err = DB.AutoMigrate(&Poll{}, &Vote{}, &Reminder{})
 	if err != nil {
-		log.Fatal("Ошибка миграции:", err)
+		log.Fatalf("Ошибка миграции таблиц: %v", err)
 	}
 
 	log.Println("✅ База данных инициализирована")

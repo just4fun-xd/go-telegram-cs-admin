@@ -20,53 +20,63 @@ func StartReminderRoutine(bot *tgbotapi.BotAPI) {
 	}()
 }
 
+// checkReminders — каждые 30 сек ищет записи в таблице reminders, где ReminderTime<=now и Reminded=false.
 func checkReminders(bot *tgbotapi.BotAPI) {
 	now := time.Now()
-	var polls []db.Poll
-	err := db.DB.Where("reminder_date IS NOT NULL AND reminded = ? AND reminder_date <= ?", false, now).
-		Find(&polls).Error
+	var items []db.Reminder
+	err := db.DB.Where("reminded = ? AND reminder_time <= ?", false, now).Find(&items).Error
 	if err != nil {
-		log.Println("Ошибка поиска опросов:", err)
+		log.Println("Ошибка поиска reminders:", err)
 		return
 	}
 
-	for _, p := range polls {
-		wday := getRussianWeekday(p.EventDate.Weekday())
-		dateFmt := fmt.Sprintf("%s (%s)", wday, p.EventDate.Format("02.01"))
+	for _, r := range items {
+		// Извлекаем список голосов, где VoteDate=r.OptionDate
+		// чтобы собрать участников
+		var earliestVotes []db.Vote
+		db.DB.Where("poll_id = ? AND vote_date = ?", r.PollID, r.OptionDate).
+			Order("created_at ASC").
+			Limit(constants.NumbersOfPlayers).
+			Find(&earliestVotes)
 
-		// Собираем участников — разное поведение для day/weekly
-		var votes []db.Vote
-		if p.OptionsCount == 3 {
-			// Дневной опрос => только "да" (храним VoteDate = p.PollDay)
-			db.DB.Where("poll_id = ? AND vote_date = ?", p.PollID, p.PollDay).Find(&votes)
-		} else {
-			// Еженедельный опрос => все
-			db.DB.Where("poll_id = ?", p.PollID).Find(&votes)
-		}
-
-		visited := make(map[string]bool)
-		var participants string
-		for _, v := range votes {
-			if !visited[v.UserName] {
-				visited[v.UserName] = true
-				participants += "@" + v.UserName + "\n"
-			}
-		}
-
-		msgText := fmt.Sprintf(
-			"⏰ Напоминаю! Встреча состоится %s.\nУчастники:\n%s\n%s\nЕсли кто-то передумал — снимите галочку или ответьте 'нет'.",
-			dateFmt,
-			participants,
-			constants.MsgMeetingPlace, // Адрес клуба
-		)
-
-		if _, e := bot.Send(tgbotapi.NewMessage(p.ChatID, msgText)); e != nil {
-			log.Printf("Ошибка отправки напоминания PollID=%s: %v", p.PollID, e)
+		// Получаем ChatID из Poll
+		chatID := getChatID(r.PollID)
+		if chatID == 0 {
+			log.Printf("Не удалось определить ChatID для PollID=%s", r.PollID)
 			continue
 		}
 
-		p.Reminded = true
-		db.DB.Save(&p)
-		log.Printf("✅ Напоминание отправлено для PollID=%s", p.PollID)
+		// Формируем список уникальных участников
+		usersSet := make(map[string]bool)
+		var usersList string
+		for _, v := range earliestVotes {
+			if !usersSet[v.UserName] {
+				usersSet[v.UserName] = true
+				usersList += "@" + v.UserName + "\n"
+			}
+		}
+
+		// Финальное сообщение
+		fullMsg := fmt.Sprintf("⏰ Напоминаю! Встреча состоится %s.\nУчастники:\n%s\n🚨 Если кто-то передумал —предупредите об этом остальных игроков\n\n%s",
+			r.OptionDate,
+			usersList,
+			constants.MsgMeetingPlace,
+		)
+		sendNormalMessage(bot, chatID, fullMsg)
+
+		// Помечаем напоминание как отправленное
+		r.Reminded = true
+		db.DB.Save(&r)
+		log.Printf("✅ Напоминание отправлено (PollID=%s, Option=%s)", r.PollID, r.OptionDate)
 	}
+}
+
+// getChatID — вытаскиваем ChatID из Poll
+func getChatID(pollID string) int64 {
+	var p db.Poll
+	if err := db.DB.Where("poll_id = ?", pollID).First(&p).Error; err != nil {
+		log.Println("Ошибка получения Poll:", err)
+		return 0
+	}
+	return p.ChatID
 }
