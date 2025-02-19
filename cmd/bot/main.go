@@ -11,8 +11,13 @@ import (
 )
 
 func main() {
+	// Инициализация базы
 	db.InitDB()
+
+	// Загрузка конфигурации
 	cfg := config.LoadConfig()
+
+	// Создаём экземпляр бота
 	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramToken)
 	if err != nil {
 		log.Fatal("Ошибка запуска бота:", err)
@@ -22,14 +27,27 @@ func main() {
 	// Запускаем горутину напоминаний
 	bot.StartReminderRoutine(botAPI)
 
+	// Настраиваем получение обновлений
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	u.AllowedUpdates = []string{"message", "poll_answer"}
+	u.AllowedUpdates = []string{"message", "poll_answer", "callback_query"}
+	// Добавили "callback_query", чтобы бот принимал события от инлайн-кнопок
+
 	updates := botAPI.GetUpdatesChan(u)
+
+	// Обрабатываем обновления
 	for update := range updates {
-		if update.PollAnswer != nil {
+		switch {
+		case update.CallbackQuery != nil:
+			// Нажатие на инлайн-кнопку
+			bot.HandleCallbackQuery(botAPI, update.CallbackQuery)
+
+		case update.PollAnswer != nil:
+			// Ответ на опрос (poll_answer)
 			bot.HandlePollAnswer(botAPI, update.PollAnswer)
-		} else if update.Message != nil {
+
+		case update.Message != nil:
+			// Обычное сообщение (текст, команда и т.д.)
 			bot.HandleMessage(botAPI, update.Message)
 		}
 	}

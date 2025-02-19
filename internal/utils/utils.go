@@ -2,8 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
+
+var DayRegex = regexp.MustCompile(`\((\d{2})\.(\d{2})\)`)
 
 func GeneratePollOptions() []string {
 	now := time.Now()

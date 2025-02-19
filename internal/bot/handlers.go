@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -12,7 +13,16 @@ import (
 
 var lastQuietMessage = make(map[int64]int)
 
-// sanitizeText удаляет знаки препинания и лишние символы
+func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	if update.CallbackQuery != nil {
+		HandleCallbackQuery(bot, update.CallbackQuery)
+		return
+	}
+	if update.Message != nil {
+		HandleMessage(bot, update.Message)
+	}
+}
+
 func sanitizeText(text string) string {
 	re := regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 	return re.ReplaceAllString(text, "")
@@ -23,13 +33,13 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	defer deleteUserCommand(bot, msg)
 
 	if msg.IsCommand() {
-		// Удаляем предыдущее "тихое" сообщение (help/unknown)
 		if oldMsgID, ok := lastQuietMessage[chatID]; ok {
 			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			delete(lastQuietMessage, chatID)
 		}
 
 		switch msg.Command() {
+
 		case "start":
 			sendNormalMessage(bot, chatID, constants.MsgStart)
 
@@ -53,16 +63,57 @@ func HandleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			}
 			SendDayPoll(bot, chatID, dayStr)
 
+		case "cleanup":
+			count, err := CleanupOldPolls()
+			if err != nil {
+				sendNormalMessage(bot, chatID, fmt.Sprintf("Ошибка очистки: %v", err))
+			} else {
+				sendNormalMessage(bot, chatID, fmt.Sprintf("Удалено %d старых опрос(ов)", count))
+			}
+
+		case "replace":
+			if msg.ReplyToMessage == nil {
+				sendQuietMessage(bot, chatID, "Команда /replace должна быть ответом на сообщение (опрос или список участников).")
+				return
+			}
+			args := strings.Split(msg.Text, " ")
+			if len(args) < 3 {
+				sendQuietMessage(bot, chatID, "Формат: /replace @oldUser @newUser")
+				return
+			}
+			oldUser := strings.TrimPrefix(args[1], "@")
+			newUser := strings.TrimPrefix(args[2], "@")
+
+			pollObj, err := findPollByMessageID(chatID, msg.ReplyToMessage.MessageID)
+			if err != nil {
+				sendQuietMessage(bot, chatID, fmt.Sprintf("Не удалось найти опрос: %v", err))
+				return
+			}
+
+			if pollObj.OptionsCount == 3 {
+				// Дневной опрос → сразу заменяем
+				if err := replaceParticipantDay(pollObj, oldUser, newUser); err != nil {
+					sendQuietMessage(bot, chatID, fmt.Sprintf("Ошибка при замене: %v", err))
+					return
+				}
+				// Просто сообщаем об успехе
+				sendNormalMessage(bot, chatID, fmt.Sprintf("✅ @%s заменён на @%s (дневной опрос)", oldUser, newUser))
+
+			} else {
+				// Недельный → показываем клавиатуру
+				sendReplaceDayKeyboard(bot, pollObj, oldUser, newUser, msg.ReplyToMessage.MessageID)
+				// sendNormalMessage(bot, chatID, fmt.Sprintf("Выберите день для замены (@%s → @%s).", oldUser, newUser))
+			}
+
 		default:
 			sendQuietMessage(bot, chatID, constants.MsgUnknownCommand)
 		}
+
 	} else {
-		// Обычные текстовые сообщения
 		if oldMsgID, ok := lastQuietMessage[chatID]; ok {
 			bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			delete(lastQuietMessage, chatID)
 		}
-		// Приводим текст к нижнему регистру и убираем пробелы
 		text := strings.ToLower(strings.TrimSpace(msg.Text))
 		text = sanitizeText(text)
 

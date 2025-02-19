@@ -20,7 +20,6 @@ func StartReminderRoutine(bot *tgbotapi.BotAPI) {
 	}()
 }
 
-// checkReminders — каждые 30 сек ищет записи в таблице reminders, где ReminderTime<=now и Reminded=false.
 func checkReminders(bot *tgbotapi.BotAPI) {
 	now := time.Now()
 	var items []db.Reminder
@@ -31,8 +30,7 @@ func checkReminders(bot *tgbotapi.BotAPI) {
 	}
 
 	for _, r := range items {
-		// Извлекаем список голосов, где VoteDate=r.OptionDate
-		// чтобы собрать участников
+		// Выбираем первые N (например, 10) по created_at
 		var earliestVotes []db.Vote
 		db.DB.Where("poll_id = ? AND vote_date = ?", r.PollID, r.OptionDate).
 			Order("created_at ASC").
@@ -46,9 +44,8 @@ func checkReminders(bot *tgbotapi.BotAPI) {
 			continue
 		}
 
-		// Формируем список уникальных участников
-		usersSet := make(map[string]bool)
 		var usersList string
+		usersSet := make(map[string]bool)
 		for _, v := range earliestVotes {
 			if !usersSet[v.UserName] {
 				usersSet[v.UserName] = true
@@ -56,7 +53,6 @@ func checkReminders(bot *tgbotapi.BotAPI) {
 			}
 		}
 
-		// Финальное сообщение
 		fullMsg := fmt.Sprintf("⏰ Напоминаю! Встреча состоится %s.\nУчастники:\n%s\n🚨 Если кто-то передумал —предупредите об этом остальных игроков\n\n%s",
 			r.OptionDate,
 			usersList,
@@ -64,14 +60,12 @@ func checkReminders(bot *tgbotapi.BotAPI) {
 		)
 		sendNormalMessage(bot, chatID, fullMsg)
 
-		// Помечаем напоминание как отправленное
 		r.Reminded = true
 		db.DB.Save(&r)
 		log.Printf("✅ Напоминание отправлено (PollID=%s, Option=%s)", r.PollID, r.OptionDate)
 	}
 }
 
-// getChatID — вытаскиваем ChatID из Poll
 func getChatID(pollID string) int64 {
 	var p db.Poll
 	if err := db.DB.Where("poll_id = ?", pollID).First(&p).Error; err != nil {
